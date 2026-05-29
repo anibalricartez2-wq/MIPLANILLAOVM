@@ -1,82 +1,92 @@
 import streamlit as st
+import pandas as pd
 import calendar
-from datetime import date
+from datetime import datetime
 from fpdf import FPDF
 
-st.set_page_config(layout="wide")
+# --- CONFIGURACIÓN DE PÁGINA ---
+st.set_page_config(page_title="Pronóstico SAVC - Gestión de Turnos", layout="wide")
 
-# 1. ESTADO INICIAL (Nombres actualizados)
-if 'agentes' not in st.session_state:
-    st.session_state.agentes = ["BARROS", "GARCIA", "SANCHEZ", "RICARTEZ"]
-    st.session_state.prefs = {n: {"pref_m":[], "pref_t":[], "bloq":[]} for n in st.session_state.agentes}
-    st.session_state.grilla = {}
+def login():
+    if "autenticado" not in st.session_state:
+        st.session_state["autenticado"] = False
+    if not st.session_state["autenticado"]:
+        st.title("🔐 Acceso Sistema Pronóstico")
+        u = st.text_input("Usuario")
+        p = st.text_input("Contraseña", type="password")
+        if st.button("Ingresar"):
+            if "passwords" in st.secrets and u in st.secrets["passwords"] and p == st.secrets["passwords"][u]:
+                st.session_state["autenticado"] = True
+                st.rerun()
+            else: st.error("Credenciales incorrectas")
+        return False
+    return True
 
-st.title("🗓️ Planificador de Turnos - Gestión Equitativa")
+DIAS_ES = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
+DIAS_ABR = ["Lun", "Mar", "Mie", "Jue", "Vie", "Sab", "Dom"]
+MESES_ES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"]
+TURNOS = ["Mañana (06-15)", "Tarde (15-24)"]
 
-fecha_sel = st.date_input("Seleccionar mes", date(2026, 6, 1))
-anio, mes = fecha_sel.year, fecha_sel.month
-_, num_dias = calendar.monthrange(anio, mes)
-
-# 2. MENU SIDEBAR
-with st.sidebar:
-    limite_horas = st.number_input("Límite horas mensuales", value=130)
-    horas_turno = st.number_input("Horas por turno", value=6.5)
-    st.header("Restricciones")
-    for n in st.session_state.agentes:
-        with st.expander(f"Restricciones: {n}"):
-            st.session_state.prefs[n]['pref_m'] = st.multiselect("Mañana", range(1, num_dias+1), key=f"dm_{n}")
-            st.session_state.prefs[n]['pref_t'] = st.multiselect("Tarde", range(1, num_dias+1), key=f"dt_{n}")
-            st.session_state.prefs[n]['bloq'] = st.multiselect("NO trabajar", range(1, num_dias+1), key=f"bl_{n}")
-
-# 3. MOTOR (Equidad primero)
-def ejecutar_autocompletado():
-    temp_grilla = {}
-    turnos_acumulados = {n: 0 for n in st.session_state.agentes}
-    
-    for d in range(1, num_dias + 1):
-        for t in ['M', 'T']:
-            agentes_ordenados = sorted(st.session_state.agentes, key=lambda n: turnos_acumulados[n])
-            candidato_elegido = None
-            for n in agentes_ordenados:
-                if d not in st.session_state.prefs[n]['bloq']:
-                    if (turnos_acumulados[n] + 1) * horas_turno <= limite_horas:
-                        candidato_elegido = n
-                        break
-            if candidato_elegido:
-                temp_grilla[(d, t)] = candidato_elegido
-                turnos_acumulados[candidato_elegido] += 1
-    st.session_state.grilla = temp_grilla
-
-if st.sidebar.button("🚀 Autocompletar"):
-    ejecutar_autocompletado()
-    st.rerun()
-
-# 4. PDF
-def generar_pdf():
+def crear_pdf(df_final, mes_nombre, anio):
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", 'B', 16)
-    pdf.cell(200, 10, txt=f"Planilla {mes}/{anio} - {', '.join(st.session_state.agentes)}", ln=True, align='C')
-    pdf.set_font("Arial", size=10)
-    for d in range(1, num_dias + 1):
-        m = st.session_state.grilla.get((d, 'M'), "-")
-        t = st.session_state.grilla.get((d, 'T'), "-")
-        pdf.cell(200, 8, txt=f"Dia {d}: M: {m} | T: {t}", ln=True)
-    return pdf.output()
+    pdf.set_font("Arial", "B", 16)
+    t_pdf = f"CRONOGRAMA PRONOSTICADORES - {mes_nombre.upper()} {anio}"
+    pdf.cell(190, 10, t_pdf.encode('latin-1', 'replace').decode('latin-1'), ln=True, align="C")
+    pdf.ln(10)
+    pdf.set_font("Arial", "B", 10)
+    pdf.set_fill_color(31, 73, 125)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(50, 10, "FECHA", border=1, align="C", fill=True)
+    pdf.cell(70, 10, "MANANA (06-15)", border=1, align="C", fill=True)
+    pdf.cell(70, 10, "TARDE (15-24)", border=1, align="C", fill=True)
+    pdf.ln()
+    pdf.set_font("Arial", "", 9)
+    pdf.set_text_color(0, 0, 0)
+    f_p = False
+    for _, r in df_final.iterrows():
+        pdf.set_fill_color(245, 245, 245)
+        f_val = str(r['Fecha']).encode('latin-1', 'replace').decode('latin-1')
+        m_val = str(r['Mañana (06-15)']).replace("[VACANTE]", "VACANTE").encode('latin-1', 'replace').decode('latin-1')
+        t_val = str(r['Tarde (15-24)']).replace("[VACANTE]", "VACANTE").encode('latin-1', 'replace').decode('latin-1')
+        pdf.cell(50, 8, f_val, border=1, align="C", fill=f_p)
+        pdf.cell(70, 8, m_val, border=1, align="C", fill=f_p)
+        pdf.cell(70, 8, t_val, border=1, align="C", fill=f_p)
+        pdf.ln()
+        f_p = not f_p
+    return pdf.output(dest='S').encode('latin-1', 'ignore')
 
-st.sidebar.download_button("📥 Descargar PDF", data=generar_pdf(), file_name="planilla.pdf", mime="application/pdf")
-
-# 5. PLANILLA
-for d in range(1, num_dias + 1):
-    c1, c2, c3 = st.columns([1, 2, 2])
-    c1.write(f"**Día {d}**")
-    val_m = st.session_state.grilla.get((d, 'M'), "")
-    val_t = st.session_state.grilla.get((d, 'T'), "")
+if login():
+    st.sidebar.header("⚡ Panel de Control")
+    m_nom = st.sidebar.selectbox("Mes a planificar", MESES_ES, index=datetime.now().month - 1)
+    m_nro = MESES_ES.index(m_nom) + 1
+    a_nro = st.sidebar.number_input("Año", value=2026)
     
-    op = [""] + st.session_state.agentes
-    st.session_state.grilla[(d, 'M')] = c2.selectbox(f"M {d}", op, index=op.index(val_m) if val_m in op else 0, key=f"M_{d}")
-    st.session_state.grilla[(d, 'T')] = c3.selectbox(f"T {d}", op, index=op.index(val_t) if val_t in op else 0, key=f"T_{d}")
+    st.sidebar.divider()
+    L_M = st.sidebar.number_input("Límite mensual (Hs)", value=130)
+    C_S = st.sidebar.slider("Tope semanal (Hs)", 20, 60, 48)
+    MAX_SEG = st.sidebar.number_input("Máximo días seguidos", value=5)
 
-if st.sidebar.button("🗑️ Limpiar"):
-    st.session_state.grilla = {}
-    st.rerun()
+    # Nombres actualizados: BARROS, GARCIA, SANCHEZ, RICARTEZ
+    empleados = ["BARROS", "GARCIA", "SANCHEZ", "RICARTEZ"]
+    
+    cfg = {}
+    for e in empleados:
+        with st.sidebar.expander(f"👤 {e}"):
+            lic_in = st.date_input(f"Licencia/Afectación {e}", value=[], key=f"l_{e}")
+            ff = st.multiselect("Francos fijos:", range(1, 32), key=f"f_{e}")
+            pref = st.radio("Preferencia:", ["Ambos", "Solo Mañana", "Solo Tarde"], key=f"p_{e}", horizontal=True)
+            bl = []
+            c1, c2 = st.columns(2)
+            for i, d_n in enumerate(DIAS_ES):
+                col = c1 if i < 4 else c2
+                if col.checkbox(f"{d_n} M", key=f"m_{e}_{d_n}"): bl.append((d_n, TURNOS[0]))
+                if col.checkbox(f"{d_n} T", key=f"t_{e}_{d_n}"): bl.append((d_n, TURNOS[1]))
+            fl = []
+            if len(lic_in) == 2:
+                fl = pd.date_range(start=lic_in[0], end=lic_in[1]).date
+            cfg[e] = {"lic": fl, "fra": ff, "blo": bl, "pref": pref}
+
+    if st.button("🚀 GENERAR CRONOGRAMA PRONÓSTICO"):
+        n_d = calendar.monthrange(a_nro, m_nro)[1]
+        cron, h_t, h_s = [], {e: 0 for e in empleados}, {e
