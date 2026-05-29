@@ -5,7 +5,7 @@ from datetime import datetime
 from fpdf import FPDF
 
 # --- CONFIGURACIÓN DE PÁGINA ---
-st.set_page_config(page_title="Pronóstico SAVC - Gestión de Turnos", layout="wide")
+st.set_page_config(page_title="AUXILIARES OVM SAVC - Gestión de Turnos", layout="wide")
 
 def login():
     if "autenticado" not in st.session_state:
@@ -86,7 +86,7 @@ if login():
                 fl = pd.date_range(start=lic_in[0], end=lic_in[1]).date
             cfg[e] = {"lic": fl, "fra": ff, "blo": bl, "pref": pref}
 
-    if st.button("🚀 GENERAR CRONOGRAMA PRONÓSTICO"):
+    if st.button("🚀 GENERAR LISTA DE TURNOS AUXILIARES"):
         n_d = calendar.monthrange(a_nro, m_nro)[1]
         cron = []
         h_t = {e: 0 for e in empleados}
