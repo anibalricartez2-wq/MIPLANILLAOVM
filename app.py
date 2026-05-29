@@ -35,7 +35,7 @@ def crear_pdf(df_final, mes_nombre, anio):
     pdf.cell(190, 10, t_pdf.encode('latin-1', 'replace').decode('latin-1'), ln=True, align="C")
     pdf.ln(10)
     pdf.set_font("Arial", "B", 10)
-    pdf.set_fill_color(31, 73, 125)
+    pdf.set_fill_color(31, 73, 125) 
     pdf.set_text_color(255, 255, 255)
     pdf.cell(50, 10, "FECHA", border=1, align="C", fill=True)
     pdf.cell(70, 10, "MANANA (06-15)", border=1, align="C", fill=True)
@@ -67,7 +67,6 @@ if login():
     C_S = st.sidebar.slider("Tope semanal (Hs)", 20, 60, 48)
     MAX_SEG = st.sidebar.number_input("Máximo días seguidos", value=5)
 
-    # Nombres actualizados: BARROS, GARCIA, SANCHEZ, RICARTEZ
     empleados = ["BARROS", "GARCIA", "SANCHEZ", "RICARTEZ"]
     
     cfg = {}
@@ -89,4 +88,73 @@ if login():
 
     if st.button("🚀 GENERAR CRONOGRAMA PRONÓSTICO"):
         n_d = calendar.monthrange(a_nro, m_nro)[1]
-        cron, h_t, h_s = [], {e: 0 for e in empleados}, {e
+        cron = []
+        h_t = {e: 0 for e in empleados}
+        h_s = {e: 0 for e in empleados}
+        seguidos = {e: 0 for e in empleados}
+        t_ayer, s_act = None, None
+
+        for d in range(1, n_d + 1):
+            f_dt = datetime(a_nro, m_nro, d)
+            idx_s, n_dia = f_dt.weekday(), DIAS_ES[f_dt.weekday()]
+            i_sem = f_dt.isocalendar()[1]
+            if i_sem != s_act:
+                h_s = {e: 0 for e in empleados}
+                s_act = i_sem
+            
+            hs_v = 18 if idx_s >= 5 else 9
+            f_str = f"{DIAS_ABR[idx_s]} {f_dt.strftime('%d/%m/%Y')}"
+            h_hoy = [] 
+            
+            for t in TURNOS:
+                cand = []
+                for e in empleados:
+                    es_lic = f_dt.date() in cfg[e]["lic"]
+                    es_fra = d in cfg[e]["fra"]
+                    es_blo = (n_dia, t) in cfg[e]["blo"]
+                    ya_trabajo_hoy = e in h_hoy
+                    desc_min = not (t == TURNOS[0] and e == t_ayer)
+                    
+                    l_m = h_t[e] + hs_v <= L_M
+                    l_s = h_s[e] + hs_v <= C_S
+                    l_seg = seguidos[e] < MAX_SEG
+                    
+                    p_ok = True
+                    if cfg[e]["pref"] == "Solo Mañana" and t != TURNOS[0]: p_ok = False
+                    if cfg[e]["pref"] == "Solo Tarde" and t != TURNOS[1]: p_ok = False
+                    
+                    if not any([es_lic, es_fra, es_blo, ya_trabajo_hoy]) and desc_min and l_m and l_s and l_seg and p_ok:
+                        cand.append(e)
+                
+                cand.sort(key=lambda x: h_t[x])
+                el = cand[0] if cand else "[VACANTE]"
+                cron.append({"n": d, "Fecha": f_str, "Turno": t, "Empleado": el})
+                
+                if el != "[VACANTE]":
+                    h_t[el] += hs_v
+                    h_s[el] += hs_v
+                    h_hoy.append(el)
+                    seguidos[el] += 1
+                    if t == TURNOS[1]: t_ayer = el
+                else:
+                    if t == TURNOS[1]: t_ayer = None
+            
+            for e in empleados:
+                if e not in h_hoy: seguidos[e] = 0
+
+        if len(cron) > 0:
+            df = pd.DataFrame(cron)
+            df_c = df.pivot_table(index=['n', 'Fecha'], columns='Turno', values='Empleado', aggfunc='first').reset_index()
+            df_c = df_c.sort_values('n').drop(columns='n')
+            st.subheader(f"Vista Previa Planilla: {m_nom}")
+            st.dataframe(df_c, use_container_width=True)
+            
+            p_bytes = crear_pdf(df_c, m_nom, a_nro)
+            st.download_button(label="📥 Descargar PDF Pronosticadores", data=p_bytes, file_name=f"Turnos_Pronostico_{m_nom}.pdf", mime="application/pdf")
+            
+            st.divider()
+            st.subheader("📊 Control de Carga Horaria")
+            cols = st.columns(len(empleados))
+            for i, e in enumerate(empleados):
+                cols[i].metric(e, f"{h_t[e]} hs")
+                cols[i].progress(min(h_t[e]/L_M, 1.0))
